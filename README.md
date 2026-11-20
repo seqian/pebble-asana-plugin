@@ -1,44 +1,40 @@
 # Pebble–Asana
 
-Native Pebble plugin for Index voice-to-task capture. **Development preview; not yet tested on a device or published.**
+Native Pebble plugin for Index voice-to-task capture. **Early development preview; not yet device-tested or published.**
 
-## Behavior
+## Features
 
-- OAuth through Pebble's App Store broker (no Asana client secret in the PBW).
-- User selects a default Asana workspace on the plugin settings page.
-- By default, a task is assigned to the connected user and has **no project membership**.
-- If Index chooses a project from `reminders/list` (passing its `instanceId`), or supplies `project_name`, a uniquely matching accessible project receives the task.
-- `due_iso` is optional. If present, provide a genuine absolute ISO time and IANA `timezone`; Asana receives `due_at` in UTC.
-- Does not create Asana push notifications or reminders. It creates tasks with optional due times.
+- OAuth 2.0 through Pebble App Store's hosted OAuth broker: no client secret in this repository or the PBW.
+- A connected user chooses a default Asana workspace.
+- Tasks are assigned to the connected user and have **no project** unless a project is explicitly selected.
+- Exposes accessible, unarchived projects through `reminders/list`. Index may pass the project's `instanceId` to `create_reminder`; the action also accepts `project_name` and rejects missing or duplicate project names.
+- Due times are optional. When `due_iso` is supplied it must contain an actual RFC3339 UTC offset plus a `timezone`. Asana receives `due_at` normalized to UTC.
+- No notification is guaranteed by assigning a due date.
 
-## Required OAuth setup
+## Development
 
-1. Create an Asana application at https://app.asana.com/0/developer-console.
-2. Register redirect URI: `https://appstore-api.repebble.com/api/oauth/broker/callback`
-3. Enable the necessary Asana OAuth scopes for profile/workspaces/project listing/task creation. Check current mappings, suggested `users:read`, `workspaces:read`, `projects:read`, `tasks:write`; grant only supported scopes.
-4. Publish or configure the connector in Pebble Developer Dashboard with slug `asana`:
-   - Authorization URL: `https://app.asana.com/-/oauth_authorize`
-   - Token URL: `https://app.asana.com/-/oauth_token`
-   - Client ID and secret entered **only in Pebble's OAuth connector**, not committed here.
-5. Install the plugin, connect Asana, select a workspace.
-
-See https://developer.repebble.com/guides/plugins/publishing-plugins/ for the latest broker procedure.
-
-## Build and test
+Prerequisites: Pebble SDK and Node.js (for tests / build regeneration).
 
 ```sh
 npm test
-node scripts/build-plugin.mjs
+npm run build
+pebble build
 ```
 
-**Packaging is not yet wired**: the Pebble manifest points to `src/plugin/index.js` which contains an inline-build marker; before building the PBW, change it to `build-src/plugin.js` (or use the build script integration). The Pebble plugins SDK's `pebble build` / plugin packager is needed to generate a PBW. This is an early source scaffold, not a release build.
+`src/plugin/template.js` + `src/plugin/core.js` are bundled into the committed `src/plugin/index.js` by `npm run build`. The package manifest references the generated script directly, so `pebble build` can package it. The `wscript` bundles no watch binary.
 
-## Known follow-up validation
+## OAuth app setup — action required
 
-- Confirm Index passes project selection via `instanceId` (and whether it ever sends `project_name`).
-- Confirm exact Asana OAuth scopes accepted in the Asana developer console and the broker refresh lifecycle.
-- Test workspace picker, task creation, pagination, expired tokens, device permissions and time-zone behavior on Android and iOS.
-- Confirm whether Index can request a due date without a clock time; current `due_iso` mapping creates a timed task.
-- Review manifest packaging and App Store submission requirements.
+1. Register an OAuth app in the [Asana developer console](https://app.asana.com/0/developer-console).
+2. Set redirect URI to `https://appstore-api.repebble.com/api/oauth/broker/callback`.
+3. In Pebble Developer Dashboard / `pebble oauth-connector set --slug asana`, configure Asana authorization URL `https://app.asana.com/-/oauth_authorize` and token URL `https://app.asana.com/-/oauth_token`, current supported least-privilege scopes, Asana client ID and secret. **Never commit these credentials.**
+4. Verify Asana scope requirements in the current developer console for users/workspaces/projects read and tasks write. Exact accepted scope names must be confirmed before release.
+5. Install a preview PBW and connect Asana from the plugin settings page. Select the workspace.
 
-No private user data or credentials are committed.
+## Testing / limitations
+
+Core mapping and project-selection tests are in `test/core.test.cjs`. This implementation has not yet been validated in Pebble's plugin runtime. Test OAuth/refresh, workspace and project discovery, user permissions, and end-to-end Index utterances on a real phone. In particular, verify whether Index actually supplies custom `project_name` vs only `instanceId`.
+
+Asana API errors after an uncertain network failure must not automatically trigger a retry, as the task might have been created.
+
+See [Pebble plugin documentation](https://developer.repebble.com/guides/plugins/preview/) and [Publishing Plugins](https://developer.repebble.com/guides/plugins/publishing-plugins/).

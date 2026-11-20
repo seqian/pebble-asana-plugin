@@ -5,7 +5,8 @@
   "description": "Native Pebble Index destination for Asana tasks",
   "scripts": {
     "test": "node --test test/*.test.cjs",
-    "check": "node --check src/plugin/index.js"
+    "check": "node --check src/plugin/index.js",
+    "build": "node scripts/build-plugin.mjs"
   },
   "pebble": {
     "displayName": "Asana",
