@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Asana for Pebble</title>
+<style>
+:root {color-scheme:light dark} body {font:16px system-ui,sans-serif; margin:0; padding:22px;max-width:580px}
+h1{font-size:23px;margin:0 0 8px} p{line-height:1.45;color:inherit} label{display:block;margin:20px 0 8px;font-weight:600}
+button,select{font:inherit;border-radius:9px;padding:12px;width:100%;box-sizing:border-box}
+button{border:0;background:#f06a6a;color:#fff;margin-top:12px} button.alt{background:#777;color:white}
+select{background:transparent;color:inherit;border:1px solid #888} [hidden]{display:none!important}
+#status{padding:12px;border-radius:9px;background:rgba(128,128,128,.15);margin-top:16px}
+.small{font-size:13px;opacity:.8}
+</style></head><body>
+<h1>Asana for Pebble</h1>
+<p>Capture tasks by voice. By default, tasks are assigned to you in your chosen workspace, without a project.</p>
+<button id="connect" hidden>Connect Asana</button>
+<div id="choices" hidden><label for="workspace">Default workspace</label><select id="workspace"></select>
+<p class="small">If Index names a project, the plugin will use that project when uniquely matched. Otherwise it creates a task without project membership.</p>
+<button id="disconnect" class="alt">Disconnect Asana</button></div>
+<div id="status" role="status">Starting plugin…</div>
+<script>
+(function(){
+ var connect=document.getElementById('connect'), choices=document.getElementById('choices');
+ var select=document.getElementById('workspace'), disconnect=document.getElementById('disconnect'), status=document.getElementById('status');
+ async function send(message){return Pebble.sendMessage('plugin',message);}
+ function message(text){status.textContent=text;}
+ async function load(){
+   var state=await send({type:'status'}); if(state.error)throw Error(state.error);
+   connect.hidden=state.connected;choices.hidden=!state.connected;
+   if(!state.connected){message('Not connected. Sign in with Asana to continue.');return;}
+   var response=await send({type:'workspaces'});if(response.error)throw Error(response.error);
+   select.replaceChildren();
+   var prompt=document.createElement('option');prompt.value='';prompt.textContent='Choose a workspace';select.appendChild(prompt);
+   (response.workspaces||[]).forEach(function(w){var option=document.createElement('option');option.value=w.gid;option.textContent=w.name;select.appendChild(option)});
+   select.value=response.selected||'';
+   message(response.selected?'Ready. Voice tasks will go to this workspace.':'Select a workspace to enable Asana for Index.');
+ }
+ connect.onclick=async function(){connect.disabled=true;message('Opening Asana authorization…');
+   try{var r=await send({type:'connect'});if(r.error)throw Error(r.error);await load();}
+   catch(e){message(e.message||String(e));}finally{connect.disabled=false;}
+ };
+ select.onchange=async function(){if(!select.value)return;select.disabled=true;
+   try{var r=await send({type:'select_workspace',gid:select.value});if(r.error)throw Error(r.error);
+     message('Saved default workspace. You can now create Asana tasks.');}
+   catch(e){message(e.message||String(e));}finally{select.disabled=false;}
+ };
+ disconnect.onclick=async function(){disconnect.disabled=true;
+   try{var r=await send({type:'disconnect'});if(r.error)throw Error(r.error);await load();}
+   catch(e){message(e.message||String(e));}finally{disconnect.disabled=false;}
+ };
+ Pebble.addEventListener('ready',function(e){if(e.target==='plugin')load().catch(function(err){message(err.message||String(err));});});
+})();
+</script></body></html>
