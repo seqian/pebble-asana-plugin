@@ -1,0 +1,122 @@
+{
+  "name": "pebble-asana-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native Pebble Index destination for Asana tasks",
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "check": "node --check src/plugin/index.js",
+    "build": "node scripts/build-plugin.mjs"
+  },
+  "pebble": {
+    "displayName": "Asana",
+    "uuid": "7fb9c322-171d-44bc-9fbe-8ca0dbca27cf",
+    "sdkVersion": "3",
+    "projectType": "plugin",
+    "configPage": "src/config.html",
+    "usesPermissions": [
+      {
+        "name": "Internet",
+        "parameters": {
+          "domains": [
+            "app.asana.com"
+          ]
+        },
+        "reason": "To load workspaces and projects and create tasks in Asana",
+        "required": true
+      }
+    ],
+    "plugin": {
+      "description": "Create Asana tasks from Index, optionally with due dates and project destinations. Choose a default workspace; tasks without a project are assigned to you without project membership.",
+      "script": "src/plugin/index.js",
+      "oauth": {
+        "asana": {}
+      },
+      "sources": [
+        {
+          "category": "reminders",
+          "items": [
+            "configured"
+          ],
+          "properties": {
+            "name": [
+              "shortText"
+            ],
+            "configured": [
+              "boolean",
+              "shortText"
+            ]
+          },
+          "supportsMultiple": false,
+          "callerPermissions": [],
+          "suggestedRefreshIntervalSec": 60
+        },
+        {
+          "category": "reminders",
+          "items": [
+            "list"
+          ],
+          "properties": {
+            "name": [
+              "shortText"
+            ],
+            "destination": [
+              "shortText"
+            ],
+            "url": [
+              "longText"
+            ]
+          },
+          "supportsMultiple": true,
+          "callerPermissions": [],
+          "suggestedRefreshIntervalSec": 900
+        }
+      ],
+      "actions": [
+        {
+          "name": "create_reminder",
+          "description": "Create an Asana task assigned to the connected user in the selected default workspace. Omit instanceId for a task with no project. To place in a specific project use instanceId from reminders/list, or supply project_name and the plugin will require a unique matching accessible project. due_iso is an optional absolute RFC3339 date-time with timezone. When no due date is requested, omit due_iso.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Task title"
+              },
+              "due_iso": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Optional absolute due instant, including Z or numeric UTC offset"
+              },
+              "timezone": {
+                "type": "string",
+                "description": "IANA time zone for due_iso; required when due_iso supplied"
+              },
+              "instanceId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Optional project GID from reminders/list"
+              },
+              "project_name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Optional Asana project name, resolved uniquely in the default workspace"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "additionalProperties": false
+          },
+          "targets": [
+            "reminders/list"
+          ],
+          "destructive": false,
+          "requiresConfirmation": false,
+          "callerPermissions": []
+        }
+      ]
+    }
+  }
+}
