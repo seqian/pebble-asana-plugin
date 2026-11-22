@@ -79,3 +79,69 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" "$pbw" --verify-tag --generate-notes
           fi
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+    concurrency:
+      group: pebble-asana-store-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pebble-asana-plugin
+          path: dist
+      - name: Publish new version to Pebble App Store
+        env:
+          API_BASE: https://appstore-api.repebble.com
+          APP_ID: 19140e48acf9464f907a59d7
+          APP_UUID: 7fb9c322-171d-44bc-9fbe-8ca0dbca27cf
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pbws=(dist/pebble-asana-plugin-v*.pbw)
+          if (( ${#pbws[@]} != 1 )); then
+            echo "::error::Expected exactly one versioned PBW artifact"
+            exit 1
+          fi
+          pbw="${pbws[0]}"
+          version="${pbw##*/pebble-asana-plugin-v}"
+          version="${version%.pbw}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
+            echo "::error::Unexpected release version: $version"
+            exit 1
+          fi
+
+          # Only this job can mint an OIDC token; the build job cannot.
+          token="$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$API_BASE" | jq -er '.value')"
+          echo "::add-mask::$token"
+
+          # Avoid attempting to republish an existing version on later merges.
+          curl -fsS -H "Authorization: Bearer $token" \
+            "$API_BASE/api/v1/developer/me" > /tmp/pebble-apps.json
+          if ! jq -e --arg id "$APP_ID" --arg uuid "$APP_UUID" \
+            '.apps[] | select(.app_id == $id and ((.app_uuid // "") | ascii_downcase) == $uuid)' \
+            /tmp/pebble-apps.json >/dev/null; then
+            echo "::error::Pebble App Store app ID / UUID not found for this GitHub OIDC identity"
+            exit 1
+          fi
+          if jq -e --arg id "$APP_ID" --arg version "$version" \
+            '.apps[] | select(.app_id == $id) | .versions | index($version)' \
+            /tmp/pebble-apps.json >/dev/null; then
+            echo "Version $version is already published; bump package.json version to release changes."
+            exit 0
+          fi
+
+          curl --fail-with-body -sS -H "Authorization: Bearer $token" \
+            --form-string "version=$version" \
+            --form-string "releaseNotes=Automated release from GitHub main ($GITHUB_SHA)" \
+            --form-string isPublished=true \
+            -F "pbwFile=@$pbw;type=application/octet-stream" \
+            "$API_BASE/api/dashboard/apps/$APP_ID/releases"
+          echo
