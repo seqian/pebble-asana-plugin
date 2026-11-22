@@ -1,0 +1,81 @@
+name: Pebble plugin CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Test and check generated plugin
+        run: |
+          npm test
+          npm run build
+          npm run check
+          git diff --exit-code -- src/plugin/index.js
+      - uses: astral-sh/setup-uv@v7
+      - name: Install Pebble SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-2.0-0 libglib2.0-0 libpixman-1-0 zlib1g libsndio7.0
+          uv tool install --python 3.13 pebble-tool==5.1.2
+          echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
+      - name: Build and verify PBW
+        run: |
+          pebble sdk install 4.44
+          pebble build
+          pbw="build/${PWD##*/}.pbw"
+          unzip -t "$pbw"
+          version="$(node -p 'require("./package.json").version')"
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Expected tag v$version to match package.json"
+            exit 1
+          fi
+          mkdir -p dist
+          cp "$pbw" "dist/pebble-asana-plugin-v$version.pbw"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pebble-asana-plugin
+          path: dist/*.pbw
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: pebble-release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pebble-asana-plugin
+          path: dist
+      - name: Attach PBW to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          pbw="dist/pebble-asana-plugin-$GITHUB_REF_NAME.pbw"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$pbw" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$pbw" --verify-tag --generate-notes
+          fi

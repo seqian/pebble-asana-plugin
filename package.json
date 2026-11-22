@@ -1,6 +1,7 @@
 {
   "name": "pebble-asana-plugin",
   "version": "0.1.0",
+  "author": "seqian",
   "private": true,
   "description": "Native Pebble Index destination for Asana tasks",
   "scripts": {
