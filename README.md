@@ -1,6 +1,8 @@
 # Pebble–Asana
 
-Native Pebble plugin for Index voice-to-task capture. **Early development preview; not yet device-tested or published.**
+Native Pebble plugin for Index voice-to-task capture.
+
+**[Get Pebble–Asana on the Pebble App Store](https://apps.repebble.com/19140e48acf9464f907a59d7)**
 
 ## Features
 
@@ -33,7 +35,7 @@ pebble build
 
 ## Testing / limitations
 
-Core mapping and project-selection tests are in `test/core.test.cjs`. This implementation has not yet been validated in Pebble's plugin runtime. Test OAuth/refresh, workspace and project discovery, user permissions, and end-to-end Index utterances on a real phone. In particular, verify whether Index actually supplies custom `project_name` vs only `instanceId`.
+Core mapping and project-selection tests are in `test/core.test.cjs`. When testing changes in Pebble's plugin runtime, check OAuth/refresh, workspace and project discovery, user permissions, and end-to-end Index utterances on a real phone. Also check which project-selection fields Index supplies (`project_name` or `instanceId`).
 
 Asana API errors after an uncertain network failure must not automatically trigger a retry, as the task might have been created.
 
