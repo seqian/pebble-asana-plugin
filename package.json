@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "author": "seqian",
   "private": true,
-  "description": "Native Pebble Index destination for Asana tasks",
+  "description": "Native Pebble devices destination for Asana tasks",
   "scripts": {
     "test": "node --test test/*.test.cjs",
     "check": "node --check src/plugin/index.js",
@@ -28,7 +28,7 @@
       }
     ],
     "plugin": {
-      "description": "Create Asana tasks from Index, optionally with due dates and project destinations. Choose a default workspace; tasks without a project are assigned to you without project membership.",
+      "description": "Create Asana tasks from Pebble devices, optionally with due dates and project destinations. Choose a default workspace; tasks without a project are assigned to you without project membership.",
       "script": "src/plugin/index.js",
       "oauth": {
         "asana": {}
