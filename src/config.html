@@ -11,42 +11,83 @@ select{background:transparent;color:inherit;border:1px solid #888} [hidden]{disp
 .small{font-size:13px;opacity:.8}
 </style></head><body>
 <h1>Asana for Pebble</h1>
-<p>Capture tasks by voice. By default, tasks are assigned to you in your chosen workspace, without a project.</p>
+<p>Tasks are assigned to you in your chosen workspace.</p>
 <button id="connect" hidden>Connect Asana</button>
 <div id="choices" hidden><label for="workspace">Default workspace</label><select id="workspace"></select>
-<p class="small">If Index names a project, the plugin will use that project when uniquely matched. Otherwise it creates a task without project membership.</p>
+<div id="project-choice" hidden>
+<label for="project">Default project</label><select id="project"></select>
+<p class="small">Choose No project to send tasks to My Tasks. A specific destination from Index overrides this setting.</p>
+</div>
 <button id="disconnect" class="alt">Disconnect Asana</button></div>
 <div id="status" role="status">Starting plugin…</div>
 <script>
 (function(){
  var connect=document.getElementById('connect'), choices=document.getElementById('choices');
  var select=document.getElementById('workspace'), disconnect=document.getElementById('disconnect'), status=document.getElementById('status');
+ var projectChoice=document.getElementById('project-choice'), project=document.getElementById('project');
+ var savedWorkspace='', savedProject='';
  async function send(message){return Pebble.sendMessage('plugin',message);}
  function message(text){status.textContent=text;}
+ function addOption(control,value,label){
+   var option=document.createElement('option');option.value=value;option.textContent=label;control.appendChild(option);
+   return option;
+ }
+ function busy(value){select.disabled=value;project.disabled=value;disconnect.disabled=value;}
+ async function loadProjects(){
+   projectChoice.hidden=true;
+   if(!savedWorkspace){message('Select a workspace to enable Asana for Index.');return;}
+   message('Loading Asana projects…');
+   var response=await send({type:'projects',workspace:savedWorkspace});
+   if(response.error && typeof response.selected!=='string')throw Error(response.error);
+   savedProject=response.selected||'';
+   project.replaceChildren();
+   addOption(project,'','No project');
+   (response.projects||[]).forEach(function(p){addOption(project,p.gid,p.name);});
+   var unavailable=savedProject && !(response.projects||[]).some(function(p){return String(p.gid)===savedProject;});
+   if(unavailable)addOption(project,savedProject,'Saved project unavailable').disabled=true;
+   project.value=savedProject;
+   projectChoice.hidden=false;
+   message(response.error || (unavailable?'Choose another default project or select No project.':'Ready to create Asana tasks.'));
+ }
  async function load(){
+   projectChoice.hidden=true;
    var state=await send({type:'status'}); if(state.error)throw Error(state.error);
    connect.hidden=state.connected;choices.hidden=!state.connected;
    if(!state.connected){message('Not connected. Sign in with Asana to continue.');return;}
    var response=await send({type:'workspaces'});if(response.error)throw Error(response.error);
    select.replaceChildren();
-   var prompt=document.createElement('option');prompt.value='';prompt.textContent='Choose a workspace';select.appendChild(prompt);
-   (response.workspaces||[]).forEach(function(w){var option=document.createElement('option');option.value=w.gid;option.textContent=w.name;select.appendChild(option)});
-   select.value=response.selected||'';
-   message(response.selected?'Ready. Voice tasks will go to this workspace.':'Select a workspace to enable Asana for Index.');
+   addOption(select,'','Choose a workspace').disabled=true;
+   (response.workspaces||[]).forEach(function(w){addOption(select,w.gid,w.name);});
+   savedWorkspace=response.selected||'';
+   select.value=savedWorkspace;
+   await loadProjects();
  }
- connect.onclick=async function(){connect.disabled=true;message('Opening Asana authorization…');
+ connect.onclick=async function(){connect.disabled=true;busy(true);message('Opening Asana authorization…');
    try{var r=await send({type:'connect'});if(r.error)throw Error(r.error);await load();}
-   catch(e){message(e.message||String(e));}finally{connect.disabled=false;}
+   catch(e){message(e.message||String(e));}finally{connect.disabled=false;busy(false);}
  };
- select.onchange=async function(){if(!select.value)return;select.disabled=true;
+ select.onchange=async function(){if(!select.value)return;busy(true);
    try{var r=await send({type:'select_workspace',gid:select.value});if(r.error)throw Error(r.error);
-     message('Saved default workspace. You can now create Asana tasks.');}
-   catch(e){message(e.message||String(e));}finally{select.disabled=false;}
+     savedWorkspace=r.workspace;await loadProjects();}
+   catch(e){select.value=savedWorkspace;message(e.message||String(e));}finally{busy(false);}
  };
- disconnect.onclick=async function(){disconnect.disabled=true;
+ project.onchange=async function(){busy(true);
+   try{var r=await send({type:'select_project',workspace:savedWorkspace,gid:project.value});if(r.error)throw Error(r.error);
+     savedProject=r.selected;
+     var unavailable=Array.prototype.find.call(project.options,function(o){return o.disabled;});
+     if(unavailable)unavailable.remove();
+     message(savedProject?'Saved default project.':'Cleared default project.');
+   }
+   catch(e){project.value=savedProject;message(e.message||String(e));}finally{busy(false);}
+ };
+ disconnect.onclick=async function(){busy(true);
    try{var r=await send({type:'disconnect'});if(r.error)throw Error(r.error);await load();}
-   catch(e){message(e.message||String(e));}finally{disconnect.disabled=false;}
+   catch(e){message(e.message||String(e));}finally{busy(false);}
  };
- Pebble.addEventListener('ready',function(e){if(e.target==='plugin')load().catch(function(err){message(err.message||String(err));});});
+ Pebble.addEventListener('ready',async function(e){
+   if(e.target!=='plugin')return;
+   busy(true);
+   try{await load();}catch(err){message(err.message||String(err));}finally{busy(false);}
+ });
 })();
 </script></body></html>
