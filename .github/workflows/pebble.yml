@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ['[0-9]+.[0-9]+.[0-9]+*']
   workflow_dispatch:
 
 permissions:
@@ -36,17 +36,21 @@ jobs:
           echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
       - name: Build and verify PBW
         run: |
+          version="$(node -p 'require("./package.json").version')"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?(\+[A-Za-z0-9.-]+)?$ ]]; then
+            echo "::error::Expected a version without a v prefix in package.json"
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "$version" ]]; then
+            echo "::error::Expected tag $version to match package.json"
+            exit 1
+          fi
           pebble sdk install 4.44
           pebble build
           pbw="build/${PWD##*/}.pbw"
           unzip -t "$pbw"
-          version="$(node -p 'require("./package.json").version')"
-          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$version" ]]; then
-            echo "::error::Expected tag v$version to match package.json"
-            exit 1
-          fi
           mkdir -p dist
-          cp "$pbw" "dist/pebble-asana-plugin-v$version.pbw"
+          cp "$pbw" "dist/pebble-asana-plugin-$version.pbw"
       - uses: actions/upload-artifact@v4
         with:
           name: pebble-asana-plugin
@@ -54,7 +58,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -86,6 +90,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
+      pull-requests: read
       id-token: write
     concurrency:
       group: pebble-asana-store-publish
@@ -97,6 +102,7 @@ jobs:
           path: dist
       - name: Publish new version to Pebble App Store
         env:
+          GH_TOKEN: ${{ github.token }}
           API_BASE: https://appstore-api.repebble.com
           APP_ID: 19140e48acf9464f907a59d7
           APP_UUID: 7fb9c322-171d-44bc-9fbe-8ca0dbca27cf
@@ -104,18 +110,14 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          pbws=(dist/pebble-asana-plugin-v*.pbw)
+          pbws=(dist/pebble-asana-plugin-*.pbw)
           if (( ${#pbws[@]} != 1 )); then
             echo "::error::Expected exactly one versioned PBW artifact"
             exit 1
           fi
           pbw="${pbws[0]}"
-          version="${pbw##*/pebble-asana-plugin-v}"
+          version="${pbw##*/pebble-asana-plugin-}"
           version="${version%.pbw}"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
-            echo "::error::Unexpected release version: $version"
-            exit 1
-          fi
 
           # Only this job can mint an OIDC token; the build job cannot.
           if ! token="$(curl -fsS --get --data-urlencode "audience=$API_BASE" \
@@ -158,9 +160,26 @@ jobs:
             exit 0
           fi
 
+          # Match the PR for this main push, preferring its exact merge commit.
+          if ! notes="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            | jq -r --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" '
+              map(select(.merged_at and .base.ref == "main" and .base.repo.full_name == $repo))
+              | sort_by(.merge_commit_sha == $sha, .merged_at)
+              | last // empty
+              | (.body // "" | gsub("^\\s+|\\s+$"; "")) as $body
+              | (if $body == "" then .title else $body end) + "\n\n" + .html_url
+            ')"; then
+            echo "::warning::Could not look up GitHub PR notes. Using the push summary."
+            notes=""
+          fi
+          if [[ -z "$notes" ]]; then
+            summary="$(jq -r '(.head_commit.message // "") | split("\n") | first' "$GITHUB_EVENT_PATH")"
+            notes="${summary:-Release $version}"$'\n\n'"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          fi
+
           if ! curl --fail-with-body -sS -H "Authorization: Bearer $token" \
             --form-string "version=$version" \
-            --form-string "releaseNotes=Automated release from GitHub main ($GITHUB_SHA)" \
+            --form-string "releaseNotes=$notes" \
             --form-string isPublished=true \
             -F "pbwFile=@$pbw;type=application/octet-stream" \
             "$API_BASE/api/dashboard/apps/$APP_ID/releases"; then
