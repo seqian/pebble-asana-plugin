@@ -1,6 +1,6 @@
 {
   "name": "pebble-asana-plugin",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "seqian",
   "private": true,
   "description": "Native Pebble devices destination for Asana tasks",
@@ -28,7 +28,7 @@
       }
     ],
     "plugin": {
-      "description": "Create Asana tasks from Pebble devices, optionally with due dates and project destinations. Choose a default workspace; tasks without a project are assigned to you without project membership.",
+      "description": "Capture tasks in Asana effortlessly with Pebble devices.\n\nTurn spoken reminders into Asana tasks without reaching for your phone. Tasks are automatically added to your preferred Asana workspace, with the option to specify a project and due date.\n\nConnect your Asana account securely through OAuth and stay organized wherever inspiration strikes.\n\nThis Plugin is a mirror of the Todoist one published by Pebble, adjusted for Asana.",
       "script": "src/plugin/index.js",
       "oauth": {
         "asana": {}
@@ -76,7 +76,7 @@
       "actions": [
         {
           "name": "create_reminder",
-          "description": "Create an Asana task assigned to the connected user in the selected default workspace. Omit instanceId for a task with no project. To place in a specific project use instanceId from reminders/list, or supply project_name and the plugin will require a unique matching accessible project. due_iso is an optional absolute RFC3339 date-time with timezone. When no due date is requested, omit due_iso.",
+          "description": "Create an Asana task assigned to the connected user in the selected default workspace. When no destination is requested, omit instanceId and project_name to use the configured default project, if any. For an explicit destination use instanceId from reminders/list, including My Tasks (no project), or supply project_name for a unique matching accessible project. due_iso is an optional absolute RFC3339 date-time with timezone. When no due date is requested, omit due_iso.",
           "parameters": {
             "type": "object",
             "properties": {

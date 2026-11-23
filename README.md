@@ -7,8 +7,8 @@ Native Pebble plugin for Index voice-to-task capture.
 ## Features
 
 - OAuth 2.0 through Pebble App Store's hosted OAuth broker: no client secret in this repository or the PBW.
-- A connected user chooses a default Asana workspace.
-- Tasks are assigned to the connected user and have **no project** unless a project is explicitly selected.
+- A connected user chooses a default Asana workspace and can optionally choose a default project in it. Select **No project** to clear that preference. Changing workspaces clears the default project.
+- Tasks are assigned to the connected user. An explicit destination overrides the default project. If neither is set, tasks go to My Tasks without project membership.
 - Exposes accessible, unarchived projects through `reminders/list`. Index may pass the project's `instanceId` to `create_reminder`; the action also accepts `project_name` and rejects missing or duplicate project names.
 - Due times are optional. When `due_iso` is supplied it must contain an actual RFC3339 UTC offset plus a `timezone`. Asana receives `due_at` normalized to UTC.
 - No notification is guaranteed by assigning a due date.

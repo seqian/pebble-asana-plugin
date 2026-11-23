@@ -4,6 +4,7 @@ var KEY_TOKEN = 'asana.access';
 var KEY_REFRESH = 'asana.broker_refresh';
 var KEY_EXPIRY = 'asana.expires_at';
 var KEY_WORKSPACE = 'asana.workspace';
+var KEY_PROJECT = 'asana.project';
 var KEY_USER = 'asana.user';
 var SOURCES = ['reminders/configured', 'reminders/list'];
 // Bundles use a single entrypoint; this core is inlined by scripts/build-plugin.mjs.
@@ -26,6 +27,7 @@ async function clearAuth() {
   await Pebble.secureStorage.removeItem(KEY_REFRESH);
   localStorage.removeItem(KEY_EXPIRY);
   localStorage.removeItem(KEY_WORKSPACE);
+  localStorage.removeItem(KEY_PROJECT);
   localStorage.removeItem(KEY_USER);
 }
 async function token() {
@@ -86,7 +88,9 @@ async function paginated(path, override) {
 }
 async function workspaces(access) { return paginated('/workspaces?opt_fields=gid,name', access); }
 async function projects(workspace) {
-  return paginated('/workspaces/' + encodeURIComponent(workspace) + '/projects?opt_fields=gid,name,archived');
+  var result = await paginated('/workspaces/' + encodeURIComponent(workspace) + '/projects?opt_fields=gid,name,archived');
+  if (result.ok) result.data = result.data.filter(function (p) { return p && p.gid && p.name && p.archived !== true; });
+  return result;
 }
 async function me(access) { return api('GET', '/users/me?opt_fields=gid,name', null, access); }
 function configured() { return !!(localStorage.getItem(KEY_WORKSPACE) && localStorage.getItem(KEY_USER)); }
@@ -108,7 +112,7 @@ Pebble.registerSourceHandler(async function (request, respond) {
   var instances = [{ instanceId: 'workspace', properties: {
     name: reading('My Tasks (no project)'), destination: reading('Asana workspace'), url: { longText: { text: 'https://app.asana.com/' } }
   } }];
-  result.data.filter(function (p) { return p && p.gid && p.name && p.archived !== true; }).forEach(function (p) {
+  result.data.forEach(function (p) {
     instances.push({ instanceId: String(p.gid), properties: {
       name: reading(p.name), destination: reading('Asana project'),
       url: { longText: { text: 'https://app.asana.com/0/' + encodeURIComponent(p.gid) } }
@@ -122,24 +126,33 @@ Pebble.registerActionHandler(async function (request, respond) {
   if (!configured()) return respond.error('AUTH_REQUIRED', 'Choose a default Asana workspace in the plugin settings.');
   if (!(await item(KEY_TOKEN))) return respond.error('AUTH_REQUIRED', 'Sign in to Asana from plugin settings.');
   if (args.instanceId && args.project_name) return respond.error('INVALID_ARGS', 'Specify a project ID or project name, not both.');
-  var gid = null, workspace = localStorage.getItem(KEY_WORKSPACE);
+  var workspace = localStorage.getItem(KEY_WORKSPACE), user = localStorage.getItem(KEY_USER);
+  if (!workspace || !user) return respond.error('AUTH_REQUIRED', 'Choose a default Asana workspace in the plugin settings.');
+  var gid = null;
+  var defaultProject = !args.instanceId && !args.project_name && localStorage.getItem(KEY_PROJECT);
   if (args.instanceId && args.instanceId !== 'workspace') {
     if (typeof args.instanceId !== 'string') return respond.error('INVALID_ARGS', 'Invalid project ID.');
     gid = args.instanceId;
   }
+  if (defaultProject) gid = defaultProject;
   if (args.project_name || gid) {
     var loaded = await projects(workspace);
     if (!loaded.ok) return fail(loaded, respond, 'Unable to validate project destination.');
     if (args.project_name) {
-      var found = AsanaCore.resolveProject(loaded.data.filter(function (p) { return p.archived !== true; }), args.project_name);
+      var found = AsanaCore.resolveProject(loaded.data, args.project_name);
       if (found.error) return respond.error('INVALID_ARGS', found.error);
       gid = found.project.gid;
-    } else if (!loaded.data.some(function (p) { return p.gid === gid && p.archived !== true; })) {
-      return respond.error('INVALID_ARGS', 'That project is not accessible in the selected workspace.');
+    } else if (!loaded.data.some(function (p) { return String(p.gid) === gid; })) {
+      return respond.error('INVALID_ARGS', defaultProject ?
+        'The default project is no longer available. Choose another project or clear the default in Settings.' :
+        'That project is not accessible in the selected workspace.');
     }
   }
+  if (localStorage.getItem(KEY_WORKSPACE) !== workspace || localStorage.getItem(KEY_USER) !== user) {
+    return respond.error('INVALID_ARGS', 'Asana settings changed. Please try again.');
+  }
   var payload;
-  try { payload = AsanaCore.taskPayload(args, workspace, gid, localStorage.getItem(KEY_USER)); }
+  try { payload = AsanaCore.taskPayload(args, workspace, gid, user); }
   catch (error) { return respond.error('INVALID_ARGS', error.message); }
   var created = await api('POST', '/tasks', payload);
   if (!created.ok) return fail(created, respond, 'Asana could not create the task.');
@@ -167,6 +180,7 @@ Pebble.registerConfigHandler(async function (message, respond) {
         await saveAuth(bundle);
         localStorage.setItem(KEY_USER, String(profile.json.data.gid));
         localStorage.removeItem(KEY_WORKSPACE);
+        localStorage.removeItem(KEY_PROJECT);
         Pebble.refreshSources(SOURCES);
         return respond({ connected: true, ready: false, workspaces: all.data });
       }
@@ -180,9 +194,32 @@ Pebble.registerConfigHandler(async function (message, respond) {
         var list = await workspaces();
         if (!list.ok) return respond({ error: 'Cannot validate workspace.' });
         if (!list.data.some(function (w) { return String(w.gid) === requested; })) return respond({ error: 'Workspace not accessible.' });
+        if (localStorage.getItem(KEY_WORKSPACE) !== requested) localStorage.removeItem(KEY_PROJECT);
         localStorage.setItem(KEY_WORKSPACE, requested);
         Pebble.refreshSources(SOURCES);
         return respond({ ready: true, workspace: requested });
+      }
+      case 'projects':
+      case 'select_project': {
+        var workspace = localStorage.getItem(KEY_WORKSPACE), user = localStorage.getItem(KEY_USER);
+        if (!workspace || !user || workspace !== message.workspace) return respond({ error: 'Select a workspace first.' });
+        var selecting = message.type === 'select_project';
+        if (selecting && message.gid === '') {
+          localStorage.removeItem(KEY_PROJECT);
+          return respond({ selected: '' });
+        }
+        var available = await projects(workspace);
+        if (workspace !== localStorage.getItem(KEY_WORKSPACE) || user !== localStorage.getItem(KEY_USER)) {
+          return respond({ error: 'Asana settings changed. Reopen settings to continue.' });
+        }
+        var selected = localStorage.getItem(KEY_PROJECT) || '';
+        if (!available.ok) return respond({ selected: selected, error: 'Unable to load Asana projects.' });
+        if (!selecting) return respond({ projects: available.data, selected: selected });
+        if (!available.data.some(function (p) { return String(p.gid) === message.gid; })) {
+          return respond({ error: 'That project is not accessible in the selected workspace.' });
+        }
+        localStorage.setItem(KEY_PROJECT, message.gid);
+        return respond({ selected: message.gid });
       }
       case 'disconnect':
         await clearAuth();
